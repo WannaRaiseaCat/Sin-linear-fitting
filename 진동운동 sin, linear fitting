@@ -1,0 +1,75 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
+
+# Load the Excel file and read all sheets
+file_path = r"C:\Users\silen\Downloads\0626experimentdata.xlsx"
+sheets = pd.read_excel(file_path, sheet_name=None)
+
+# Define the fit_sin function
+def fit_sin(tt, yy):
+    '''Fit sin to the input time sequence, and return fitting parameters "amp", "omega", "phase", "offset", "freq", "period" and "fitfunc"'''
+    tt = np.array(tt)
+    yy = np.array(yy)
+    ff = np.fft.fftfreq(len(tt), (tt[1] - tt[0]))   # assume uniform spacing
+    Fyy = abs(np.fft.fft(yy))
+    guess_freq = abs(ff[np.argmax(Fyy[1:]) + 1])   # excluding the zero frequency "peak", which is related to offset
+    guess_amp = np.std(yy) * 2**0.5
+    guess_offset = np.mean(yy)
+    guess = np.array([guess_amp, 2 * np.pi * guess_freq, 0., guess_offset])
+
+    def sinfunc(t, A, w, p, c): return A * np.sin(w * t + p) + c
+    popt, pcov = curve_fit(sinfunc, tt, yy, p0=guess)
+    A, w, p, c = popt
+    f = w / (2 * np.pi)
+    fitfunc = lambda t: A * np.sin(w * t + p) + c
+    return {"amp": A, "omega": w, "phase": p, "offset": c, "freq": f, "period": 1 / f, "fitfunc": fitfunc, "maxcov": np.max(pcov), "rawres": (guess, popt, pcov)}
+
+# Function to fit the data
+def fit_data(data):
+    # Ensure the first row is treated as header
+    data.columns = ['t', 'x', 'y']
+    data = data.iloc[1:].reset_index(drop=True)
+    data['t'] = data['t'].astype(float)
+    data['x'] = data['x'].astype(float)
+    data['y'] = data['y'].astype(float)
+    
+    # Fit the sinusoidal function to the x data using fit_sin
+    fit_result = fit_sin(data['t'], data['x'])
+    fitted_x = fit_result['fitfunc'](data['t'])
+    
+    # Linear fit for y
+    coeffs_y = np.polyfit(data['t'], data['y'], deg=1)
+    poly_y = np.poly1d(coeffs_y)
+    fitted_y = poly_y(data['t'])
+    
+    return data['t'], data['x'], fitted_x, data['y'], fitted_y, fit_result, coeffs_y
+
+# Plot the results for each sheet
+fig, axs = plt.subplots(3, 2, figsize=(14, 18))
+sheet_names = list(sheets.keys())
+
+for i, sheet_name in enumerate(sheet_names):
+    data = sheets[sheet_name]
+    t, x, fitted_x, y, fitted_y, fit_result, coeffs_y = fit_data(data)
+    
+    print(f"Sheet {i+1}: Sinusoidal fit parameters for x: amp={fit_result['amp']:.4f}, omega={fit_result['omega']:.4f}, phase={fit_result['phase']:.4f}, offset={fit_result['offset']:.4f}")
+    print(f"Sheet {i+1}: Linear fit parameters for y: slope={coeffs_y[0]:.4f}, intercept={coeffs_y[1]:.4f}")
+    
+    axs[i, 0].plot(t, x, label='Original x')
+    axs[i, 0].plot(t, fitted_x, label='Fitted x', linestyle='--')
+    axs[i, 0].set_xlabel('Time (t)')
+    axs[i, 0].set_ylabel('x')
+    axs[i, 0].set_title(f'Sheet {i+1}: Sinusoidal Fit for x')
+    axs[i, 0].legend()
+    
+    axs[i, 1].plot(t, y, label='Original y', color='r')
+    axs[i, 1].plot(t, fitted_y, label='Fitted y', linestyle='--', color='g')
+    axs[i, 1].set_xlabel('Time (t)')
+    axs[i, 1].set_ylabel('y')
+    axs[i, 1].set_title(f'Sheet {i+1}: Linear Fit for y')
+    axs[i, 1].legend()
+
+plt.tight_layout()
+plt.show()
